@@ -2,6 +2,7 @@ import { useState } from 'react';
 import { supabaseClient } from '../../lib/supabaseClient';
 import { useRouter } from 'next/router';
 import { toast } from 'react-hot-toast';
+import Link from 'next/link';
 
 export default function CrawlPage() {
   const [url, setUrl] = useState('');
@@ -47,8 +48,9 @@ export default function CrawlPage() {
         throw new Error(text);
       }
 
+      const doc = await response.json();
       toast.success('Website crawl started');
-      router.push('/knowledge-base');
+      router.push(`/knowledge-base?highlight=${doc.id}`);
     } catch (err: any) {
       toast.error(err.message || 'Failed to start crawl');
     } finally {
@@ -58,7 +60,15 @@ export default function CrawlPage() {
 
   return (
     <div className="container mx-auto px-4 py-8">
-      <h1 className="text-3xl font-bold mb-8">Crawl Website</h1>
+      <div className="flex justify-between items-center mb-8">
+        <h1 className="text-3xl font-bold">Crawl Website</h1>
+        <Link
+          href="/knowledge-base"
+          className="text-indigo-600 hover:text-indigo-800"
+        >
+          Back to Knowledge Base
+        </Link>
+      </div>
 
       <div className="max-w-lg space-y-6">
         <div>
