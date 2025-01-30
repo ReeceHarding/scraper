@@ -1,79 +1,121 @@
 import { useState } from 'react';
 import { supabaseClient } from '../../lib/supabaseClient';
+import { useRouter } from 'next/router';
+import { toast } from 'react-hot-toast';
 
-export default function CrawlSitePage() {
+export default function CrawlPage() {
   const [url, setUrl] = useState('');
-  const [title, setTitle] = useState('');
-  const [description, setDescription] = useState('');
-  const [errorMsg, setErrorMsg] = useState('');
-  const [successMsg, setSuccessMsg] = useState('');
+  const [maxDepth, setMaxDepth] = useState(2);
+  const [maxPages, setMaxPages] = useState(10);
+  const [isLoading, setIsLoading] = useState(false);
+  const router = useRouter();
 
   async function handleCrawl() {
-    setErrorMsg('');
-    setSuccessMsg('');
-    if (!url || !title || !description) {
-      setErrorMsg('Please provide url, title, and description');
+    if (!url) {
+      toast.error('Please enter a URL');
       return;
     }
 
+    setIsLoading(true);
     try {
-      const resp = await fetch('/api/kb/crawlSite', {
+      // Get user
+      const { data: userData, error: userError } = await supabaseClient.auth.getUser();
+      if (userError) throw userError;
+
+      // Get user's org_id
+      const { data: profile, error: profileError } = await supabaseClient
+        .from('profiles')
+        .select('org_id')
+        .eq('id', userData.user.id)
+        .single();
+
+      if (profileError) throw profileError;
+
+      // Start crawl job
+      const response = await fetch('/api/kb/crawl', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ url, title, description })
+        body: JSON.stringify({
+          url,
+          maxDepth,
+          maxPages
+        })
       });
-      if (!resp.ok) {
-        const text = await resp.text();
-        setErrorMsg(`Crawl request failed: ${text}`);
-        return;
+
+      if (!response.ok) {
+        const text = await response.text();
+        throw new Error(text);
       }
-      setSuccessMsg('Site crawl started. It may take a few minutes.');
+
+      toast.success('Website crawl started');
+      router.push('/knowledge-base');
     } catch (err: any) {
-      setErrorMsg(err.message || String(err));
+      toast.error(err.message || 'Failed to start crawl');
+    } finally {
+      setIsLoading(false);
     }
   }
 
   return (
-    <div className="container mx-auto p-4">
-      <h1 className="text-2xl font-bold mb-4">Crawl a Website</h1>
-      {errorMsg && <p className="text-red-500 mb-4">{errorMsg}</p>}
-      {successMsg && <p className="text-green-500 mb-4">{successMsg}</p>}
+    <div className="container mx-auto px-4 py-8">
+      <h1 className="text-3xl font-bold mb-8">Crawl Website</h1>
 
-      <div className="space-y-4">
+      <div className="max-w-lg space-y-6">
         <div>
-          <label className="block text-sm font-medium text-gray-700">Website URL</label>
+          <label className="block text-sm font-medium text-gray-700 mb-2">
+            Website URL
+          </label>
           <input
-            type="text"
-            placeholder="https://example.com"
+            type="url"
             value={url}
             onChange={(e) => setUrl(e.target.value)}
-            className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-indigo-500 focus:ring-indigo-500"
+            className="w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-indigo-500 focus:border-indigo-500"
+            placeholder="https://example.com"
           />
         </div>
+
         <div>
-          <label className="block text-sm font-medium text-gray-700">Title</label>
+          <label className="block text-sm font-medium text-gray-700 mb-2">
+            Maximum Depth
+          </label>
           <input
-            type="text"
-            placeholder="Descriptive title"
-            value={title}
-            onChange={(e) => setTitle(e.target.value)}
-            className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-indigo-500 focus:ring-indigo-500"
+            type="number"
+            value={maxDepth}
+            onChange={(e) => setMaxDepth(parseInt(e.target.value))}
+            min={1}
+            max={5}
+            className="w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-indigo-500 focus:border-indigo-500"
           />
+          <p className="mt-1 text-sm text-gray-500">
+            How many links deep to crawl (1-5)
+          </p>
         </div>
+
         <div>
-          <label className="block text-sm font-medium text-gray-700">Description</label>
-          <textarea
-            placeholder="Short description of what's on the site"
-            value={description}
-            onChange={(e) => setDescription(e.target.value)}
-            className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-indigo-500 focus:ring-indigo-500"
+          <label className="block text-sm font-medium text-gray-700 mb-2">
+            Maximum Pages
+          </label>
+          <input
+            type="number"
+            value={maxPages}
+            onChange={(e) => setMaxPages(parseInt(e.target.value))}
+            min={1}
+            max={50}
+            className="w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-indigo-500 focus:border-indigo-500"
           />
+          <p className="mt-1 text-sm text-gray-500">
+            Maximum number of pages to crawl (1-50)
+          </p>
         </div>
+
         <button
           onClick={handleCrawl}
-          className="inline-flex justify-center rounded-md border border-transparent bg-indigo-600 py-2 px-4 text-sm font-medium text-white shadow-sm hover:bg-indigo-700 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:ring-offset-2"
+          disabled={isLoading}
+          className={`w-full flex justify-center py-2 px-4 border border-transparent rounded-md shadow-sm text-sm font-medium text-white bg-indigo-600 hover:bg-indigo-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500 ${
+            isLoading ? 'opacity-50 cursor-not-allowed' : ''
+          }`}
         >
-          Crawl Site
+          {isLoading ? 'Starting Crawl...' : 'Start Crawl'}
         </button>
       </div>
     </div>
