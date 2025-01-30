@@ -6,7 +6,7 @@
     "dev": "concurrently \"cd frontend && npm run dev\" \"cd backend && npm run dev\" \"cd backend && npm run workers\"",
     "dev:frontend": "cd frontend && npm run dev",
     "dev:backend": "cd backend && npm run dev",
-    "dev:workers": "cd backend && npm run workers",
+    "dev:workers": "cd backend && ts-node src/scripts/startWorkers.ts",
     "test": "cd backend && npm test",
     "test:watch": "cd backend && npm test -- --watch",
     "install:all": "npm install && cd frontend && npm install && cd ../backend && npm install",
