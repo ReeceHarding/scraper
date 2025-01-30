@@ -8,200 +8,224 @@ interface Campaign {
   description: string;
   status: string;
   metadata: {
-    queries: string[];
+    queries?: string[];
+    scraping_status?: string;
+    current_query?: string;
+    current_query_index?: number;
+    total_queries?: number;
+    last_updated?: string;
   };
   created_at: string;
 }
 
-interface Company {
-  id: string;
-  name: string;
-  linkedin_url: string;
-  description: string;
-  metadata: {
-    industry?: string;
-    size?: string;
-    location?: string;
-  };
-}
-
-interface Contact {
-  id: string;
-  name: string;
-  title: string;
-  linkedin_url: string;
-  email: string;
-  metadata: {
-    location?: string;
-    connections?: string;
-  };
+interface Stats {
+  total_companies: number;
+  total_contacts: number;
+  companies_with_contacts: number;
+  avg_contacts_per_company: number;
 }
 
 export default function CampaignDetailPage() {
   const router = useRouter();
   const { id } = router.query;
   const [campaign, setCampaign] = useState<Campaign | null>(null);
-  const [companies, setCompanies] = useState<Company[]>([]);
-  const [contacts, setContacts] = useState<Contact[]>([]);
+  const [stats, setStats] = useState<Stats | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
-  const [activating, setActivating] = useState(false);
 
   useEffect(() => {
-    if (!id) return;
-
-    async function fetchCampaign() {
-      try {
-        const { data, error } = await supabaseClient
-          .from('outreach_campaigns')
-          .select('*')
-          .eq('id', id)
-          .single();
-
-        if (error) {
-          setError(error.message);
-        } else {
-          setCampaign(data);
-        }
-      } catch (err: any) {
-        setError(err.message || String(err));
-      } finally {
-        setLoading(false);
-      }
+    if (id) {
+      loadCampaign();
+      loadStats();
     }
-
-    fetchCampaign();
   }, [id]);
 
-  async function handleActivate() {
-    if (!campaign || activating) return;
-
-    setActivating(true);
-    setError('');
-
+  async function loadCampaign() {
     try {
-      const resp = await fetch(`/api/campaigns/activate?id=${campaign.id}`, {
-        method: 'POST'
-      });
-
-      if (!resp.ok) {
-        const text = await resp.text();
-        throw new Error(text);
-      }
-
-      // Refresh campaign data
       const { data, error } = await supabaseClient
         .from('outreach_campaigns')
         .select('*')
-        .eq('id', campaign.id)
+        .eq('id', id)
         .single();
 
-      if (error) {
-        throw error;
-      }
-
+      if (error) throw error;
       setCampaign(data);
     } catch (err: any) {
       setError(err.message || String(err));
     } finally {
-      setActivating(false);
+      setLoading(false);
     }
   }
 
-  if (loading) {
-    return (
-      <div className="container mx-auto p-4">
-        <div className="animate-pulse">
-          <div className="h-8 bg-gray-200 rounded w-1/4 mb-4"></div>
-          <div className="h-4 bg-gray-200 rounded w-full mb-2"></div>
-          <div className="h-4 bg-gray-200 rounded w-3/4"></div>
-        </div>
-      </div>
-    );
+  async function loadStats() {
+    try {
+      // Get companies count
+      const { count: totalCompanies } = await supabaseClient
+        .from('outreach_companies')
+        .select('*', { count: 'exact', head: true })
+        .eq('campaign_id', id);
+
+      // Get contacts count
+      const { count: totalContacts } = await supabaseClient
+        .from('outreach_contacts')
+        .select('*', { count: 'exact', head: true })
+        .eq('campaign_id', id);
+
+      // Get companies with contacts
+      const { count: companiesWithContacts } = await supabaseClient
+        .from('outreach_companies')
+        .select('id', { count: 'exact', head: true })
+        .eq('campaign_id', id)
+        .gt('contact_count', 0);
+
+      setStats({
+        total_companies: totalCompanies || 0,
+        total_contacts: totalContacts || 0,
+        companies_with_contacts: companiesWithContacts || 0,
+        avg_contacts_per_company: totalCompanies ? (totalContacts || 0) / totalCompanies : 0
+      });
+    } catch (err: any) {
+      console.error('Error loading stats:', err);
+    }
   }
 
-  if (error) {
-    return (
-      <div className="container mx-auto p-4">
-        <div className="bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded">
-          Error: {error}
-        </div>
-      </div>
-    );
+  async function handleActivate() {
+    try {
+      const resp = await fetch(`/api/campaigns/activate?id=${id}`, { method: 'POST' });
+      if (!resp.ok) {
+        const text = await resp.text();
+        throw new Error(text);
+      }
+      loadCampaign(); // Reload to get updated status
+    } catch (err: any) {
+      setError(err.message || String(err));
+    }
   }
 
-  if (!campaign) {
-    return (
-      <div className="container mx-auto p-4">
-        <div className="bg-yellow-50 border border-yellow-200 text-yellow-700 px-4 py-3 rounded">
-          Campaign not found
-        </div>
-      </div>
-    );
-  }
+  if (loading) return <div>Loading campaign...</div>;
+  if (error) return <div className="error">{error}</div>;
+  if (!campaign) return <div>Campaign not found</div>;
+
+  const progress = campaign.metadata.current_query_index !== undefined && campaign.metadata.total_queries
+    ? ((campaign.metadata.current_query_index + 1) / campaign.metadata.total_queries) * 100
+    : 0;
 
   return (
-    <div className="container mx-auto p-4">
-      <div className="bg-white shadow rounded-lg p-6">
-        <div className="flex justify-between items-start mb-6">
+    <div className="container mx-auto px-4 py-8">
+      <div className="mb-8">
+        <div className="flex justify-between items-start mb-4">
           <div>
-            <h1 className="text-2xl font-bold text-gray-900">{campaign.name}</h1>
-            <p className="text-sm text-gray-500">Created {new Date(campaign.created_at).toLocaleDateString()}</p>
+            <h1 className="text-3xl font-bold mb-2">{campaign.name}</h1>
+            <p className="text-gray-600">{campaign.description}</p>
           </div>
-          <div className="flex items-center space-x-4">
-            <button
-              onClick={() => router.push(`/campaigns/${campaign.id}/contacts`)}
-              className="inline-flex items-center px-4 py-2 border border-gray-300 shadow-sm text-sm font-medium rounded-md text-gray-700 bg-white hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500"
-            >
-              View Contacts
-            </button>
-            <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium capitalize
-              ${campaign.status === 'active' ? 'bg-green-100 text-green-800' :
-                campaign.status === 'draft' ? 'bg-gray-100 text-gray-800' :
-                campaign.status === 'paused' ? 'bg-yellow-100 text-yellow-800' :
-                'bg-blue-100 text-blue-800'
-              }`}
-            >
-              {campaign.status}
-            </span>
-          </div>
-        </div>
-
-        <div className="prose max-w-none mb-6">
-          <h2 className="text-lg font-medium text-gray-900 mb-2">Description</h2>
-          <p className="text-gray-700">{campaign.description}</p>
-        </div>
-
-        <div className="mb-6">
-          <h2 className="text-lg font-medium text-gray-900 mb-2">Search Queries</h2>
-          <div className="space-y-2">
-            {campaign.metadata.queries.map((query, idx) => (
-              <div key={idx} className="bg-gray-50 px-4 py-2 rounded-md text-gray-700">
-                {query}
-              </div>
-            ))}
-          </div>
-        </div>
-
-        {campaign.status === 'draft' && (
-          <div className="border-t pt-4">
+          {campaign.status === 'draft' && (
             <button
               onClick={handleActivate}
-              disabled={activating}
-              className={`inline-flex justify-center py-2 px-4 border border-transparent shadow-sm text-sm font-medium rounded-md text-white 
-                ${activating ? 'bg-indigo-400 cursor-not-allowed' : 'bg-indigo-600 hover:bg-indigo-700'}
-                focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500`}
+              className="bg-green-500 hover:bg-green-600 text-white px-4 py-2 rounded"
             >
-              {activating ? 'Activating...' : 'Activate Campaign'}
+              Activate & Start Scraping
             </button>
-            {error && (
-              <p className="mt-2 text-sm text-red-600">
-                {error}
+          )}
+        </div>
+
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-6 mb-8">
+          <div className="bg-white shadow rounded-lg p-6">
+            <h2 className="text-xl font-semibold mb-4">Campaign Status</h2>
+            <div className="space-y-4">
+              <div>
+                <span className="font-medium">Status: </span>
+                <span className={`inline-block px-3 py-1 rounded-full text-sm ${
+                  campaign.status === 'active' ? 'bg-green-100 text-green-800' :
+                  campaign.status === 'draft' ? 'bg-gray-100 text-gray-800' :
+                  'bg-yellow-100 text-yellow-800'
+                }`}>
+                  {campaign.status.charAt(0).toUpperCase() + campaign.status.slice(1)}
+                </span>
+              </div>
+              {campaign.status === 'active' && (
+                <>
+                  <div>
+                    <span className="font-medium">Current Query: </span>
+                    {campaign.metadata.current_query || 'Not started'}
+                  </div>
+                  <div>
+                    <span className="font-medium">Progress: </span>
+                    <div className="w-full bg-gray-200 rounded-full h-2.5 mt-2">
+                      <div
+                        className="bg-blue-500 h-2.5 rounded-full"
+                        style={{ width: `${progress}%` }}
+                      ></div>
+                    </div>
+                    <div className="text-sm text-gray-500 mt-1">
+                      {campaign.metadata.current_query_index !== undefined && campaign.metadata.total_queries
+                        ? `Query ${campaign.metadata.current_query_index + 1} of ${campaign.metadata.total_queries}`
+                        : 'Not started'
+                      }
+                    </div>
+                  </div>
+                </>
+              )}
+            </div>
+          </div>
+
+          <div className="bg-white shadow rounded-lg p-6">
+            <h2 className="text-xl font-semibold mb-4">Search Queries</h2>
+            <div className="space-y-2">
+              {campaign.metadata.queries?.map((query, index) => (
+                <div key={index} className="p-2 bg-gray-50 rounded">
+                  {query}
+                </div>
+              ))}
+            </div>
+          </div>
+        </div>
+
+        {stats && (
+          <div className="grid grid-cols-1 md:grid-cols-4 gap-6">
+            <div className="bg-white shadow rounded-lg p-6">
+              <h3 className="text-lg font-semibold mb-2">Total Companies</h3>
+              <p className="text-3xl font-bold text-blue-600">{stats.total_companies}</p>
+            </div>
+            <div className="bg-white shadow rounded-lg p-6">
+              <h3 className="text-lg font-semibold mb-2">Total Contacts</h3>
+              <p className="text-3xl font-bold text-green-600">{stats.total_contacts}</p>
+            </div>
+            <div className="bg-white shadow rounded-lg p-6">
+              <h3 className="text-lg font-semibold mb-2">Companies w/ Contacts</h3>
+              <p className="text-3xl font-bold text-purple-600">{stats.companies_with_contacts}</p>
+            </div>
+            <div className="bg-white shadow rounded-lg p-6">
+              <h3 className="text-lg font-semibold mb-2">Avg. Contacts/Company</h3>
+              <p className="text-3xl font-bold text-orange-600">
+                {stats.avg_contacts_per_company.toFixed(1)}
               </p>
-            )}
+            </div>
           </div>
         )}
       </div>
+
+      <div className="flex space-x-4">
+        <button
+          onClick={() => router.push(`/campaigns/${id}/companies`)}
+          className="bg-blue-500 hover:bg-blue-600 text-white px-4 py-2 rounded"
+        >
+          View Companies
+        </button>
+        <button
+          onClick={() => router.push(`/campaigns/${id}/contacts`)}
+          className="bg-green-500 hover:bg-green-600 text-white px-4 py-2 rounded"
+        >
+          View Contacts
+        </button>
+      </div>
+
+      <style jsx>{`
+        .error {
+          color: red;
+          padding: 1rem;
+          text-align: center;
+        }
+      `}</style>
     </div>
   );
 } 

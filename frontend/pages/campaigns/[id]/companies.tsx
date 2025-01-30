@@ -2,67 +2,60 @@ import { useRouter } from 'next/router';
 import { useState, useEffect } from 'react';
 import { supabaseClient } from '../../../lib/supabaseClient';
 
-interface Contact {
+interface Company {
   id: string;
-  company_id: string;
-  email: string;
-  first_name: string | null;
-  last_name: string | null;
-  title: string | null;
+  domain: string;
+  name: string;
+  description: string;
   metadata: {
-    linkedin_url?: string;
+    industry?: string;
+    size?: string;
     location?: string;
+    linkedin_url?: string;
   };
+  contact_count: number;
   created_at: string;
-  company: {
-    name: string;
-    domain: string;
-  };
 }
 
-export default function ContactsPage() {
+export default function CompaniesPage() {
   const router = useRouter();
   const { id: campaignId } = router.query;
-  const [contacts, setContacts] = useState<Contact[]>([]);
+  const [companies, setCompanies] = useState<Company[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [page, setPage] = useState(1);
   const [hasMore, setHasMore] = useState(true);
   const [searchTerm, setSearchTerm] = useState('');
-  const [sortBy, setSortBy] = useState<'email' | 'created_at'>('created_at');
+  const [sortBy, setSortBy] = useState<'name' | 'contact_count' | 'created_at'>('created_at');
   const [sortOrder, setSortOrder] = useState<'asc' | 'desc'>('desc');
-  const [selectedContacts, setSelectedContacts] = useState<Set<string>>(new Set());
 
   const ITEMS_PER_PAGE = 20;
 
   useEffect(() => {
     if (campaignId) {
-      loadContacts();
+      loadCompanies();
     }
   }, [campaignId, page, searchTerm, sortBy, sortOrder]);
 
-  async function loadContacts() {
+  async function loadCompanies() {
     try {
       setLoading(true);
       let query = supabaseClient
-        .from('outreach_contacts')
-        .select(`
-          *,
-          company:outreach_companies(name, domain)
-        `)
+        .from('outreach_companies')
+        .select('*')
         .eq('campaign_id', campaignId)
         .order(sortBy, { ascending: sortOrder === 'asc' })
         .range((page - 1) * ITEMS_PER_PAGE, page * ITEMS_PER_PAGE - 1);
 
       if (searchTerm) {
-        query = query.or(`email.ilike.%${searchTerm}%,first_name.ilike.%${searchTerm}%,last_name.ilike.%${searchTerm}%`);
+        query = query.or(`name.ilike.%${searchTerm}%,domain.ilike.%${searchTerm}%`);
       }
 
       const { data, error } = await query;
 
       if (error) throw error;
 
-      setContacts(data || []);
+      setCompanies(data || []);
       setHasMore(data?.length === ITEMS_PER_PAGE);
     } catch (err: any) {
       setError(err.message || String(err));
@@ -86,70 +79,16 @@ export default function ContactsPage() {
     return sortOrder === 'asc' ? '↑' : '↓';
   }
 
-  function toggleSelectAll() {
-    if (selectedContacts.size === contacts.length) {
-      setSelectedContacts(new Set());
-    } else {
-      setSelectedContacts(new Set(contacts.map(c => c.id)));
-    }
-  }
-
-  function toggleContact(id: string) {
-    const newSelected = new Set(selectedContacts);
-    if (newSelected.has(id)) {
-      newSelected.delete(id);
-    } else {
-      newSelected.add(id);
-    }
-    setSelectedContacts(newSelected);
-  }
-
-  async function exportContacts() {
-    const contactsToExport = contacts.filter(c => selectedContacts.has(c.id));
-    const csvContent = [
-      ['Email', 'First Name', 'Last Name', 'Title', 'Company', 'Domain', 'LinkedIn', 'Location'].join(','),
-      ...contactsToExport.map(c => [
-        c.email,
-        c.first_name || '',
-        c.last_name || '',
-        c.title || '',
-        c.company.name || '',
-        c.company.domain || '',
-        c.metadata.linkedin_url || '',
-        c.metadata.location || ''
-      ].map(field => `"${field.replace(/"/g, '""')}"`).join(','))
-    ].join('\n');
-
-    const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
-    const link = document.createElement('a');
-    link.href = URL.createObjectURL(blob);
-    link.download = `contacts_export_${new Date().toISOString()}.csv`;
-    link.click();
-  }
-
   return (
     <div className="container mx-auto px-4 py-8">
       <div className="flex justify-between items-center mb-8">
-        <h1 className="text-3xl font-bold">Contacts</h1>
-        <div className="space-x-4">
-          <button
-            onClick={exportContacts}
-            disabled={selectedContacts.size === 0}
-            className={`px-4 py-2 rounded ${
-              selectedContacts.size === 0
-                ? 'bg-gray-300 cursor-not-allowed'
-                : 'bg-green-500 hover:bg-green-600 text-white'
-            }`}
-          >
-            Export Selected ({selectedContacts.size})
-          </button>
-          <button
-            onClick={() => router.back()}
-            className="bg-gray-500 hover:bg-gray-600 text-white px-4 py-2 rounded"
-          >
-            Back to Campaign
-          </button>
-        </div>
+        <h1 className="text-3xl font-bold">Companies</h1>
+        <button
+          onClick={() => router.back()}
+          className="bg-gray-500 hover:bg-gray-600 text-white px-4 py-2 rounded"
+        >
+          Back to Campaign
+        </button>
       </div>
 
       <div className="bg-white shadow rounded-lg overflow-hidden">
@@ -158,7 +97,7 @@ export default function ContactsPage() {
             <div className="flex-1">
               <input
                 type="text"
-                placeholder="Search contacts..."
+                placeholder="Search companies..."
                 value={searchTerm}
                 onChange={(e) => {
                   setSearchTerm(e.target.value);
@@ -174,28 +113,26 @@ export default function ContactsPage() {
           <table className="min-w-full divide-y divide-gray-200">
             <thead className="bg-gray-50">
               <tr>
-                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                  <input
-                    type="checkbox"
-                    checked={selectedContacts.size === contacts.length && contacts.length > 0}
-                    onChange={toggleSelectAll}
-                    className="rounded border-gray-300 text-blue-600 focus:ring-blue-500"
-                  />
-                </th>
                 <th
                   className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider cursor-pointer hover:bg-gray-100"
-                  onClick={() => handleSort('email')}
+                  onClick={() => handleSort('name')}
                 >
-                  Contact {getSortIcon('email')}
+                  Company {getSortIcon('name')}
                 </th>
                 <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                  Title
+                  Domain
                 </th>
                 <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                  Company
+                  Industry
                 </th>
                 <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
                   Location
+                </th>
+                <th
+                  className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider cursor-pointer hover:bg-gray-100"
+                  onClick={() => handleSort('contact_count')}
+                >
+                  Contacts {getSortIcon('contact_count')}
                 </th>
                 <th
                   className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider cursor-pointer hover:bg-gray-100"
@@ -206,50 +143,34 @@ export default function ContactsPage() {
               </tr>
             </thead>
             <tbody className="bg-white divide-y divide-gray-200">
-              {contacts.map((contact) => (
-                <tr key={contact.id} className="hover:bg-gray-50">
+              {companies.map((company) => (
+                <tr
+                  key={company.id}
+                  className="hover:bg-gray-50 cursor-pointer"
+                  onClick={() => router.push(`/campaigns/${campaignId}/companies/${company.id}`)}
+                >
                   <td className="px-6 py-4 whitespace-nowrap">
-                    <input
-                      type="checkbox"
-                      checked={selectedContacts.has(contact.id)}
-                      onChange={() => toggleContact(contact.id)}
-                      className="rounded border-gray-300 text-blue-600 focus:ring-blue-500"
-                    />
-                  </td>
-                  <td className="px-6 py-4">
-                    <div className="text-sm font-medium text-gray-900">
-                      {contact.first_name && contact.last_name
-                        ? `${contact.first_name} ${contact.last_name}`
-                        : contact.email}
-                    </div>
-                    <div className="text-sm text-gray-500">{contact.email}</div>
-                    {contact.metadata.linkedin_url && (
-                      <a
-                        href={contact.metadata.linkedin_url}
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        className="text-sm text-blue-600 hover:text-blue-800"
-                      >
-                        LinkedIn Profile ↗
-                      </a>
+                    <div className="text-sm font-medium text-gray-900">{company.name || 'Unknown'}</div>
+                    {company.description && (
+                      <div className="text-sm text-gray-500 truncate max-w-md">
+                        {company.description}
+                      </div>
                     )}
                   </td>
                   <td className="px-6 py-4 whitespace-nowrap">
-                    <div className="text-sm text-gray-900">{contact.title || '-'}</div>
-                  </td>
-                  <td className="px-6 py-4">
-                    <div className="text-sm font-medium text-gray-900">
-                      {contact.company.name || 'Unknown'}
-                    </div>
-                    <div className="text-sm text-gray-500">{contact.company.domain}</div>
+                    <div className="text-sm text-gray-900">{company.domain}</div>
                   </td>
                   <td className="px-6 py-4 whitespace-nowrap">
-                    <div className="text-sm text-gray-900">
-                      {contact.metadata.location || '-'}
-                    </div>
+                    <div className="text-sm text-gray-900">{company.metadata.industry || '-'}</div>
+                  </td>
+                  <td className="px-6 py-4 whitespace-nowrap">
+                    <div className="text-sm text-gray-900">{company.metadata.location || '-'}</div>
+                  </td>
+                  <td className="px-6 py-4 whitespace-nowrap">
+                    <div className="text-sm font-medium text-blue-600">{company.contact_count}</div>
                   </td>
                   <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
-                    {new Date(contact.created_at).toLocaleDateString()}
+                    {new Date(company.created_at).toLocaleDateString()}
                   </td>
                 </tr>
               ))}
@@ -260,10 +181,10 @@ export default function ContactsPage() {
                   </td>
                 </tr>
               )}
-              {!loading && contacts.length === 0 && (
+              {!loading && companies.length === 0 && (
                 <tr>
                   <td colSpan={6} className="px-6 py-4 text-center text-gray-500">
-                    No contacts found
+                    No companies found
                   </td>
                 </tr>
               )}
