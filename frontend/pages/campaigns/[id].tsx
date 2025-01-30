@@ -148,7 +148,13 @@ export default function CampaignDetailPage() {
             <h1 className="text-2xl font-bold text-gray-900">{campaign.name}</h1>
             <p className="text-sm text-gray-500">Created {new Date(campaign.created_at).toLocaleDateString()}</p>
           </div>
-          <div className="flex items-center space-x-2">
+          <div className="flex items-center space-x-4">
+            <button
+              onClick={() => router.push(`/campaigns/${campaign.id}/contacts`)}
+              className="inline-flex items-center px-4 py-2 border border-gray-300 shadow-sm text-sm font-medium rounded-md text-gray-700 bg-white hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500"
+            >
+              View Contacts
+            </button>
             <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium capitalize
               ${campaign.status === 'active' ? 'bg-green-100 text-green-800' :
                 campaign.status === 'draft' ? 'bg-gray-100 text-gray-800' :
