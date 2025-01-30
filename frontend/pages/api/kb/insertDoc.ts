@@ -1,49 +1,34 @@
 import { NextApiRequest, NextApiResponse } from 'next';
-import { supabaseAdmin } from '../../../lib/supabaseAdmin';
 import { createClient } from '@supabase/supabase-js';
-import { Queue } from 'bullmq';
-import Redis from 'ioredis';
+import { enqueueEmbeddingJob } from '../../../lib/queue';
 
-// Initialize Redis connection
-const redis = new Redis({
-  host: process.env.REDIS_HOST || 'localhost',
-  port: parseInt(process.env.REDIS_PORT || '6379')
-});
-
-// Initialize embedding queue
-const embeddingQueue = new Queue('embedding', {
-  connection: redis
-});
+const supabaseAdmin = createClient(
+  process.env.NEXT_PUBLIC_SUPABASE_URL!,
+  process.env.SUPABASE_SERVICE_ROLE_KEY!
+);
 
 export default async function handler(req: NextApiRequest, res: NextApiResponse) {
+  if (req.method !== 'POST') {
+    return res.status(405).json({ error: 'Method not allowed' });
+  }
+
   try {
-    if (req.method !== 'POST') {
-      return res.status(405).send('Method Not Allowed');
-    }
-
     const { title, description, filePath } = req.body;
+
     if (!title || !description || !filePath) {
-      return res.status(400).send('Missing required fields');
+      return res.status(400).json({ error: 'Missing required fields' });
     }
 
-    // Get user from Supabase auth
-    const authHeader = req.headers.authorization;
-    if (!authHeader) {
-      return res.status(401).send('No authorization header');
-    }
-
-    const supabase = createClient(
-      process.env.NEXT_PUBLIC_SUPABASE_URL!,
-      process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
+    // Get user from session
+    const { user, error: authError } = await supabaseAdmin.auth.getUser(
+      req.headers.authorization?.split(' ')[1] || ''
     );
 
-    const { data: { user }, error: authError } = await supabase.auth.getUser(authHeader.split(' ')[1]);
-    
     if (authError || !user) {
-      return res.status(401).send('Unauthorized');
+      return res.status(401).json({ error: 'Unauthorized' });
     }
 
-    // Get user's org_id from profiles table
+    // Get user's org_id
     const { data: profile, error: profileError } = await supabaseAdmin
       .from('profiles')
       .select('org_id')
@@ -51,7 +36,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
       .single();
 
     if (profileError || !profile?.org_id) {
-      return res.status(400).send('User has no organization');
+      return res.status(400).json({ error: 'User has no organization' });
     }
 
     // Insert document
@@ -61,32 +46,26 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
         org_id: profile.org_id,
         title,
         description,
-        file_path: filePath
+        file_path: filePath,
       })
       .select()
       .single();
 
     if (insertError) {
       console.error('Error inserting document:', insertError);
-      return res.status(500).send('Failed to insert document');
+      return res.status(500).json({ error: 'Failed to insert document' });
     }
 
     // Queue embedding job
-    await embeddingQueue.add('process_document', {
+    await enqueueEmbeddingJob({
       docId: doc.id,
       orgId: profile.org_id,
       filePath
-    }, {
-      attempts: 3,
-      backoff: {
-        type: 'exponential',
-        delay: 1000
-      }
     });
 
     return res.status(200).json(doc);
-  } catch (error: any) {
+  } catch (error) {
     console.error('Error in insertDoc:', error);
-    return res.status(500).send(error.message || 'Internal Server Error');
+    return res.status(500).json({ error: 'Internal server error' });
   }
 } 
