@@ -1,63 +1,79 @@
 import { NextApiRequest, NextApiResponse } from 'next';
-import { createClient } from '@supabase/supabase-js';
-import Redis from 'ioredis';
-
-// Initialize Redis client
-const redis = new Redis({
-  host: process.env.REDIS_HOST || 'localhost',
-  port: parseInt(process.env.REDIS_PORT || '6379')
-});
-
-// Initialize Supabase admin client
-const supabaseAdmin = createClient(
-  process.env.NEXT_PUBLIC_SUPABASE_URL!,
-  process.env.SUPABASE_SERVICE_ROLE_KEY!
-);
+import { supabaseAdmin } from '../../../../backend/src/config/supabaseAdmin';
+import { crawlQueue } from '../../../../backend/src/workers/crawlWorker';
+import { logger } from '../../../../backend/src/utils/logger';
 
 export default async function handler(req: NextApiRequest, res: NextApiResponse) {
   if (req.method !== 'POST') {
-    return res.status(405).json({ error: 'Method not allowed' });
+    return res.status(405).send('Method Not Allowed');
+  }
+
+  const { title, description, sourceUrl, maxPages, maxDepth } = req.body;
+  if (!title || !description || !sourceUrl) {
+    return res.status(400).send('Missing required fields');
   }
 
   try {
-    const { docId, url, maxDepth = 2 } = req.body;
+    // Get user from session
+    const { data: { user }, error: authError } = await supabaseAdmin.auth.getUser(req.headers.authorization?.split(' ')[1]);
+    if (authError || !user) {
+      return res.status(401).send('Not authenticated');
+    }
 
-    if (!docId || !url) {
-      return res.status(400).json({ error: 'Missing required fields' });
+    // Get user's org_id
+    const { data: profile, error: profileError } = await supabaseAdmin
+      .from('profiles')
+      .select('org_id')
+      .eq('id', user.id)
+      .single();
+
+    if (profileError || !profile?.org_id) {
+      return res.status(400).send('User has no organization');
     }
 
     // Validate URL
     try {
-      new URL(url);
+      new URL(sourceUrl);
     } catch {
-      return res.status(400).json({ error: 'Invalid URL' });
+      return res.status(400).send('Invalid URL');
     }
 
-    // Verify the document exists and get its details
+    // Insert knowledge doc
     const { data: doc, error: docError } = await supabaseAdmin
       .from('knowledge_docs')
-      .select('*')
-      .eq('id', docId)
+      .insert({
+        org_id: profile.org_id,
+        title,
+        description,
+        source_url: sourceUrl,
+        metadata: {
+          status: 'pending',
+          created_at: new Date().toISOString(),
+          max_pages: maxPages,
+          max_depth: maxDepth
+        }
+      })
+      .select()
       .single();
 
-    if (docError || !doc) {
-      console.error('Error fetching document:', docError);
-      return res.status(404).json({ error: 'Document not found' });
+    if (docError) {
+      logger.error('Error inserting knowledge doc:', docError);
+      return res.status(500).send('Failed to create document record');
     }
 
-    // Add job to crawl queue
-    await redis.lpush('crawl:queue', JSON.stringify({
-      id: docId,
-      url,
-      maxDepth,
-      metadata: doc.metadata
-    }));
+    // Queue crawl job
+    await crawlQueue.add('crawlDoc', {
+      docId: doc.id,
+      orgId: profile.org_id,
+      sourceUrl,
+      maxPages,
+      maxDepth
+    });
 
-    console.log(`Added URL ${url} to crawl queue with depth ${maxDepth}`);
-
-    return res.status(200).json({ message: 'Website queued for crawling' });
-  } catch (error: any) {
-    console.error('Error starting crawl:', error);
-    return res.status(500).json({ error: error.message || 'Internal server error' });
+    logger.info(`Document ${doc.id} created and queued for crawling`);
+    return res.status(200).json(doc);
+  } catch (err: any) {
+    logger.error('Error in crawl:', err);
+    return res.status(500).send(err.message || 'Internal server error');
   }
 } 

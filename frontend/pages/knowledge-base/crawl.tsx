@@ -3,95 +3,51 @@ import { useRouter } from 'next/router';
 import { supabaseClient } from '../../lib/supabaseClient';
 import Link from 'next/link';
 
-export default function CrawlPage() {
-  const [url, setUrl] = useState('');
+export default function CrawlWebsitePage() {
   const [title, setTitle] = useState('');
   const [description, setDescription] = useState('');
-  const [maxDepth, setMaxDepth] = useState(2);
+  const [sourceUrl, setSourceUrl] = useState('');
+  const [maxPages, setMaxPages] = useState(50);
+  const [maxDepth, setMaxDepth] = useState(3);
   const [errorMsg, setErrorMsg] = useState('');
   const [successMsg, setSuccessMsg] = useState('');
-  const [isCrawling, setIsCrawling] = useState(false);
   const router = useRouter();
 
-  async function handleCrawl(e: React.FormEvent) {
-    e.preventDefault();
+  async function handleCrawl() {
     setErrorMsg('');
     setSuccessMsg('');
 
-    if (!url || !title || !description) {
-      setErrorMsg('Please provide a URL, title, and description');
+    if (!title || !description || !sourceUrl) {
+      setErrorMsg('Please provide title, description, and URL');
       return;
     }
 
     try {
       // Validate URL
-      new URL(url);
-    } catch {
-      setErrorMsg('Please enter a valid URL');
-      return;
-    }
+      new URL(sourceUrl);
 
-    setIsCrawling(true);
-
-    try {
-      // 1. Check user authentication
-      const { data: userData, error: userError } = await supabaseClient.auth.getUser();
-      if (userError || !userData?.user) {
-        throw new Error('Not logged in');
-      }
-
-      // 2. Create knowledge doc record first
-      const { data: docData, error: docError } = await supabaseClient
-        .from('knowledge_docs')
-        .insert({
-          title,
-          description,
-          source_url: url,
-          metadata: { 
-            status: 'pending',
-            crawl_depth: maxDepth
-          }
-        })
-        .select()
-        .single();
-
-      if (docError) {
-        throw docError;
-      }
-
-      // 3. Start crawling process
-      const crawlResponse = await fetch('/api/kb/crawl', {
+      const response = await fetch('/api/kb/crawl', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          docId: docData.id,
-          url,
+          title,
+          description,
+          sourceUrl,
+          maxPages,
           maxDepth
         })
       });
 
-      if (!crawlResponse.ok) {
-        throw new Error('Failed to start crawling');
+      if (!response.ok) {
+        const text = await response.text();
+        setErrorMsg(`Failed to start crawling: ${text}`);
+        return;
       }
 
-      setSuccessMsg('Website crawling has begun');
-      
-      // Clear form
-      setUrl('');
-      setTitle('');
-      setDescription('');
-      setMaxDepth(2);
-      
-      // Redirect after a short delay
-      setTimeout(() => {
-        router.push('/knowledge-base?highlight=' + docData.id);
-      }, 2000);
-
+      setSuccessMsg('Website crawling started');
+      router.push('/knowledge-base');
     } catch (err: any) {
-      console.error('Crawl error:', err);
-      setErrorMsg(err.message || 'Failed to start crawling');
-    } finally {
-      setIsCrawling(false);
+      setErrorMsg(err.message || String(err));
     }
   }
 
@@ -120,80 +76,75 @@ export default function CrawlPage() {
           </div>
         )}
 
-        <form onSubmit={handleCrawl} className="bg-white shadow-md rounded-lg p-6">
+        <div className="max-w-lg">
           <div className="mb-6">
-            <label className="block text-gray-700 text-sm font-bold mb-2">
-              Website URL
-            </label>
-            <input
-              type="url"
-              value={url}
-              onChange={(e) => setUrl(e.target.value)}
-              className="shadow appearance-none border rounded w-full py-2 px-3 text-gray-700 leading-tight focus:outline-none focus:shadow-outline"
-              placeholder="https://example.com"
-              disabled={isCrawling}
-            />
-          </div>
-
-          <div className="mb-6">
-            <label className="block text-gray-700 text-sm font-bold mb-2">
-              Title
-            </label>
+            <label className="block text-sm font-medium mb-2">Title</label>
             <input
               type="text"
               value={title}
               onChange={(e) => setTitle(e.target.value)}
-              className="shadow appearance-none border rounded w-full py-2 px-3 text-gray-700 leading-tight focus:outline-none focus:shadow-outline"
-              placeholder="Enter a title for this website content"
-              disabled={isCrawling}
+              className="w-full px-3 py-2 border rounded-md"
+              placeholder="Enter document title"
             />
           </div>
-
+          
           <div className="mb-6">
-            <label className="block text-gray-700 text-sm font-bold mb-2">
-              Description
-            </label>
+            <label className="block text-sm font-medium mb-2">Description</label>
             <textarea
               value={description}
               onChange={(e) => setDescription(e.target.value)}
-              className="shadow appearance-none border rounded w-full py-2 px-3 text-gray-700 leading-tight focus:outline-none focus:shadow-outline"
+              className="w-full px-3 py-2 border rounded-md"
               rows={4}
-              placeholder="Enter a description of what content you expect to gather"
-              disabled={isCrawling}
+              placeholder="Enter document description"
             />
           </div>
 
           <div className="mb-6">
-            <label className="block text-gray-700 text-sm font-bold mb-2">
-              Maximum Crawl Depth
-            </label>
-            <select
-              value={maxDepth}
-              onChange={(e) => setMaxDepth(Number(e.target.value))}
-              className="shadow appearance-none border rounded w-full py-2 px-3 text-gray-700 leading-tight focus:outline-none focus:shadow-outline"
-              disabled={isCrawling}
-            >
-              <option value={1}>1 - Homepage only</option>
-              <option value={2}>2 - Homepage + direct links</option>
-              <option value={3}>3 - Homepage + two levels deep</option>
-            </select>
-            <p className="text-sm text-gray-500 mt-1">
-              Higher depth values will take longer to process
-            </p>
+            <label className="block text-sm font-medium mb-2">Website URL</label>
+            <input
+              type="url"
+              value={sourceUrl}
+              onChange={(e) => setSourceUrl(e.target.value)}
+              className="w-full px-3 py-2 border rounded-md"
+              placeholder="https://example.com"
+            />
           </div>
 
-          <div className="flex items-center justify-end">
-            <button
-              type="submit"
-              disabled={isCrawling}
-              className={`bg-blue-500 hover:bg-blue-600 text-white font-bold py-2 px-4 rounded focus:outline-none focus:shadow-outline ${
-                isCrawling ? 'opacity-50 cursor-not-allowed' : ''
-              }`}
-            >
-              {isCrawling ? 'Starting Crawler...' : 'Start Crawling'}
-            </button>
+          <div className="grid grid-cols-2 gap-4 mb-6">
+            <div>
+              <label className="block text-sm font-medium mb-2">Max Pages</label>
+              <input
+                type="number"
+                value={maxPages}
+                onChange={(e) => setMaxPages(parseInt(e.target.value))}
+                min={1}
+                max={100}
+                className="w-full px-3 py-2 border rounded-md"
+              />
+              <p className="text-sm text-gray-500 mt-1">Maximum pages to crawl (1-100)</p>
+            </div>
+
+            <div>
+              <label className="block text-sm font-medium mb-2">Max Depth</label>
+              <input
+                type="number"
+                value={maxDepth}
+                onChange={(e) => setMaxDepth(parseInt(e.target.value))}
+                min={1}
+                max={5}
+                className="w-full px-3 py-2 border rounded-md"
+              />
+              <p className="text-sm text-gray-500 mt-1">Maximum link depth (1-5)</p>
+            </div>
           </div>
-        </form>
+
+          <button
+            onClick={handleCrawl}
+            className="bg-blue-500 text-white px-6 py-2 rounded-md hover:bg-blue-600 transition-colors"
+          >
+            Start Crawling
+          </button>
+        </div>
       </div>
     </div>
   );
