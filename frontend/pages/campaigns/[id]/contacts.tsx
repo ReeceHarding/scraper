@@ -35,9 +35,9 @@ export default function CampaignContactsPage() {
   useEffect(() => {
     if (!id) return;
     loadContacts();
-  }, [id]);
+  }, [id, loadContacts]);
 
-  async function loadContacts() {
+  const loadContacts = async () => {
     try {
       // Get contacts with their company info
       const { data, error } = await supabaseClient
@@ -65,12 +65,12 @@ export default function CampaignContactsPage() {
 
       setContacts(contacts);
       setStats(stats);
-    } catch (err: any) {
-      setError(err.message || String(err));
+    } catch (error: unknown) {
+      setError(error instanceof Error ? error.message : String(error));
     } finally {
       setLoading(false);
     }
-  }
+  };
 
   if (loading) return <div>Loading contacts...</div>;
   if (error) return <div style={{ color: 'red' }}>{error}</div>;
