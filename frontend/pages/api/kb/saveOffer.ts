@@ -1,111 +1,101 @@
 import { NextApiRequest, NextApiResponse } from 'next';
 import { supabaseAdmin } from '../../../../backend/src/config/supabaseAdmin';
-import { enqueueEmbeddingJob } from '../../../../backend/src/queues/embeddingQueue';
+import { embeddingQueue } from '../../../../backend/src/workers/embeddingWorker';
+import { logger } from '../../../../backend/src/utils/logger';
 
 export default async function handler(req: NextApiRequest, res: NextApiResponse) {
+  if (req.method !== 'POST') {
+    return res.status(405).send('Method Not Allowed');
+  }
+
+  const { title, description, content, existingId } = req.body;
+  if (!title || !description || !content) {
+    return res.status(400).send('Missing required fields');
+  }
+
   try {
-    if (req.method !== 'POST') {
-      return res.status(405).send('Method Not Allowed');
-    }
-
-    const { offerText } = req.body;
-    if (!offerText?.trim()) {
-      return res.status(400).send('Offer text is required');
-    }
-
     // Get user from session
-    const { data: { user }, error: authError } = await supabaseAdmin.auth.getUser(req.headers.authorization?.split(' ')[1] || '');
+    const { data: { user }, error: authError } = await supabaseAdmin.auth.getUser(req.headers.authorization?.split(' ')[1]);
     if (authError || !user) {
       return res.status(401).send('Not authenticated');
     }
 
     // Get user's org_id
-    const { data: profile } = await supabaseAdmin
+    const { data: profile, error: profileError } = await supabaseAdmin
       .from('profiles')
       .select('org_id')
       .eq('id', user.id)
       .single();
 
-    if (!profile?.org_id) {
+    if (profileError || !profile?.org_id) {
       return res.status(400).send('User has no organization');
     }
 
-    // Check if an offer doc already exists
-    const { data: existingOffer } = await supabaseAdmin
-      .from('knowledge_docs')
-      .select('id')
-      .eq('org_id', profile.org_id)
-      .eq('metadata->is_offer', true)
-      .single();
+    let doc;
 
-    let docId: string;
-
-    if (existingOffer) {
+    if (existingId) {
       // Update existing offer
       const { data: updatedDoc, error: updateError } = await supabaseAdmin
         .from('knowledge_docs')
         .update({
-          description: 'Updated Hormozi-style offer',
+          title,
+          description,
+          content,
           metadata: {
-            is_offer: true,
+            type: 'hormozi_offer',
             status: 'pending',
-            content: offerText
+            last_updated: new Date().toISOString()
           }
         })
-        .eq('id', existingOffer.id)
+        .eq('id', existingId)
+        .eq('metadata->type', 'hormozi_offer')
         .select()
         .single();
 
       if (updateError) {
-        console.error('[KB] Error updating offer:', updateError);
+        logger.error('Error updating offer:', updateError);
         return res.status(500).send('Failed to update offer');
       }
 
-      docId = existingOffer.id;
-
-      // Delete existing chunks
-      await supabaseAdmin
-        .from('knowledge_doc_chunks')
-        .delete()
-        .eq('doc_id', docId);
-
+      doc = updatedDoc;
     } else {
-      // Create new offer doc
+      // Create new offer
       const { data: newDoc, error: insertError } = await supabaseAdmin
         .from('knowledge_docs')
         .insert({
           org_id: profile.org_id,
-          title: 'Hormozi-Style Offer',
-          description: 'Your no-brainer offer',
+          title,
+          description,
+          content,
           metadata: {
-            is_offer: true,
+            type: 'hormozi_offer',
             status: 'pending',
-            content: offerText
+            created_at: new Date().toISOString()
           }
         })
         .select()
         .single();
 
       if (insertError) {
-        console.error('[KB] Error creating offer:', insertError);
+        logger.error('Error inserting offer:', insertError);
         return res.status(500).send('Failed to create offer');
       }
 
-      docId = newDoc.id;
+      doc = newDoc;
     }
 
-    // Enqueue embedding job
-    await enqueueEmbeddingJob({
-      docId,
+    // Queue embedding job
+    await embeddingQueue.add('embedDoc', {
+      docId: doc.id,
       orgId: profile.org_id,
-      content: offerText
+      content,
+      isOffer: true
     });
 
-    console.log(`[KB] Offer ${docId} saved and embedding job enqueued`);
-    return res.status(200).json({ docId });
-
-  } catch (error: any) {
-    console.error('[KB] Error in saveOffer:', error);
-    return res.status(500).json({ error: error.message });
+    logger.info(`Offer ${doc.id} saved and queued for embedding`);
+    return res.status(200).json(doc);
+  } catch (err: any) {
+    logger.error('Error in saveOffer:', err);
+    return res.status(500).send(err.message || 'Internal server error');
   }
 } 
