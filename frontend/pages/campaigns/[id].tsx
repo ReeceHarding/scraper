@@ -2,47 +2,106 @@ import { useRouter } from 'next/router';
 import { useState, useEffect } from 'react';
 import { supabaseClient } from '../../lib/supabaseClient';
 
+interface Campaign {
+  id: string;
+  name: string;
+  description: string;
+  status: string;
+  metadata: {
+    queries?: string[];
+    scraping_status?: string;
+    current_query?: string;
+    processed_companies?: number;
+    error?: string;
+    completed_at?: string;
+  };
+  created_at: string;
+}
+
+interface Company {
+  id: string;
+  name: string;
+  linkedin_url: string;
+  description: string;
+  metadata: {
+    industry?: string;
+    size?: string;
+    location?: string;
+  };
+}
+
+interface Contact {
+  id: string;
+  name: string;
+  title: string;
+  linkedin_url: string;
+  email: string;
+  metadata: {
+    location?: string;
+    connections?: string;
+  };
+}
+
 export default function CampaignDetailPage() {
   const router = useRouter();
   const { id } = router.query;
-  const [campaign, setCampaign] = useState<any>(null);
+  const [campaign, setCampaign] = useState<Campaign | null>(null);
+  const [companies, setCompanies] = useState<Company[]>([]);
+  const [contacts, setContacts] = useState<Contact[]>([]);
   const [errorMsg, setErrorMsg] = useState('');
   const [isLoading, setIsLoading] = useState(true);
 
   useEffect(() => {
     if (!id) return;
-    loadCampaign();
+    loadCampaignData();
+    const interval = setInterval(loadCampaignData, 5000); // Poll every 5 seconds
+    return () => clearInterval(interval);
   }, [id]);
 
-  async function loadCampaign() {
+  async function loadCampaignData() {
     try {
-      const { data, error } = await supabaseClient
+      // Load campaign
+      const { data: campaignData, error: campaignError } = await supabaseClient
         .from('outreach_campaigns')
-        .select(`
-          *,
-          outreach_companies (
-            id,
-            domain,
-            status,
-            outreach_contacts (
-              id,
-              email,
-              name
-            )
-          )
-        `)
+        .select('*')
         .eq('id', id)
         .single();
 
-      if (error) {
-        setErrorMsg(error.message);
-      } else {
-        setCampaign(data);
+      if (campaignError) {
+        setErrorMsg(campaignError.message);
+        return;
       }
+
+      setCampaign(campaignData);
+
+      // Load companies
+      const { data: companiesData, error: companiesError } = await supabaseClient
+        .from('outreach_companies')
+        .select('*')
+        .eq('campaign_id', id);
+
+      if (companiesError) {
+        setErrorMsg(companiesError.message);
+        return;
+      }
+
+      setCompanies(companiesData);
+
+      // Load contacts
+      const { data: contactsData, error: contactsError } = await supabaseClient
+        .from('outreach_contacts')
+        .select('*')
+        .eq('campaign_id', id);
+
+      if (contactsError) {
+        setErrorMsg(contactsError.message);
+        return;
+      }
+
+      setContacts(contactsData);
+      setIsLoading(false);
     } catch (err: any) {
       setErrorMsg(err.message || String(err));
-    } finally {
-      setIsLoading(false);
     }
   }
 
@@ -54,109 +113,147 @@ export default function CampaignDetailPage() {
         const txt = await resp.text();
         setErrorMsg(txt);
       } else {
-        alert('Campaign activated. Scraping job enqueued.');
-        loadCampaign(); // Reload to show updated status
+        await loadCampaignData(); // Refresh data immediately
       }
     } catch (err: any) {
       setErrorMsg(err.message || String(err));
     }
   }
 
-  if (isLoading) return (
-    <div className="container mx-auto p-4">
-      <p>Loading campaign details...</p>
-    </div>
-  );
-
-  if (!campaign) return (
-    <div className="container mx-auto p-4">
-      <p className="text-red-500">{errorMsg || 'Campaign not found'}</p>
-    </div>
-  );
+  if (isLoading || !campaign) return <div>Loading... {errorMsg}</div>;
 
   return (
     <div className="container mx-auto p-4">
-      <div className="mb-6">
-        <h1 className="text-2xl font-bold">{campaign.name}</h1>
-        <p className="text-gray-600 mt-2">{campaign.description}</p>
-        <div className="mt-4 flex items-center gap-4">
-          <span className={`px-3 py-1 rounded-full text-sm ${
-            campaign.status === 'draft' ? 'bg-gray-100 text-gray-800' :
-            campaign.status === 'active' ? 'bg-green-100 text-green-800' :
-            'bg-blue-100 text-blue-800'
-          }`}>
-            {campaign.status}
-          </span>
-          {campaign.status === 'draft' && (
-            <button
-              onClick={handleActivate}
-              className="px-4 py-2 bg-indigo-600 text-white rounded-md hover:bg-indigo-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500"
-            >
-              Activate & Start Scraping
-            </button>
-          )}
-        </div>
+      <h1 className="text-2xl font-bold mb-4">Campaign: {campaign.name}</h1>
+      
+      {/* Campaign Info */}
+      <div className="bg-white rounded-lg shadow p-4 mb-4">
+        <h2 className="text-xl font-semibold mb-2">Campaign Details</h2>
+        <p><strong>Description:</strong> {campaign.description}</p>
+        <p><strong>Status:</strong> {campaign.status}</p>
+        <p><strong>Created:</strong> {new Date(campaign.created_at).toLocaleString()}</p>
+        
+        {/* Scraping Status */}
+        {campaign.metadata?.scraping_status && (
+          <div className="mt-2">
+            <p><strong>Scraping Status:</strong> {campaign.metadata.scraping_status}</p>
+            {campaign.metadata.current_query && (
+              <p><strong>Current Query:</strong> {campaign.metadata.current_query}</p>
+            )}
+            {campaign.metadata.processed_companies !== undefined && (
+              <p><strong>Companies Processed:</strong> {campaign.metadata.processed_companies}</p>
+            )}
+            {campaign.metadata.completed_at && (
+              <p><strong>Completed At:</strong> {new Date(campaign.metadata.completed_at).toLocaleString()}</p>
+            )}
+            {campaign.metadata.error && (
+              <p className="text-red-500"><strong>Error:</strong> {campaign.metadata.error}</p>
+            )}
+          </div>
+        )}
+
+        {/* Activation Button */}
+        {campaign.status === 'draft' && (
+          <button
+            onClick={handleActivate}
+            className="mt-4 bg-blue-500 text-white px-4 py-2 rounded hover:bg-blue-600"
+          >
+            Activate & Start Scraping
+          </button>
+        )}
       </div>
 
-      {errorMsg && <p className="text-red-500 mb-4">{errorMsg}</p>}
-
-      <div className="mb-6">
-        <h2 className="text-xl font-semibold mb-3">Search Queries</h2>
-        <ul className="list-disc pl-5 space-y-1">
-          {campaign.metadata?.queries?.map((query: string, idx: number) => (
-            <li key={idx} className="text-gray-700">{query}</li>
+      {/* Search Queries */}
+      <div className="bg-white rounded-lg shadow p-4 mb-4">
+        <h2 className="text-xl font-semibold mb-2">Search Queries</h2>
+        <ul className="list-disc pl-4">
+          {campaign.metadata?.queries?.map((query, idx) => (
+            <li key={idx}>{query}</li>
           ))}
         </ul>
       </div>
 
-      <div>
-        <h2 className="text-xl font-semibold mb-3">Companies & Contacts</h2>
-        {campaign.outreach_companies && campaign.outreach_companies.length > 0 ? (
-          <div className="overflow-x-auto">
-            <table className="min-w-full divide-y divide-gray-200">
-              <thead className="bg-gray-50">
-                <tr>
-                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                    Domain
-                  </th>
-                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                    Status
-                  </th>
-                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                    Contacts
-                  </th>
+      {/* Companies */}
+      <div className="bg-white rounded-lg shadow p-4 mb-4">
+        <h2 className="text-xl font-semibold mb-2">Companies ({companies.length})</h2>
+        <div className="overflow-x-auto">
+          <table className="min-w-full">
+            <thead>
+              <tr className="bg-gray-100">
+                <th className="px-4 py-2">Name</th>
+                <th className="px-4 py-2">Industry</th>
+                <th className="px-4 py-2">Size</th>
+                <th className="px-4 py-2">Location</th>
+                <th className="px-4 py-2">Actions</th>
+              </tr>
+            </thead>
+            <tbody>
+              {companies.map(company => (
+                <tr key={company.id} className="border-t">
+                  <td className="px-4 py-2">{company.name}</td>
+                  <td className="px-4 py-2">{company.metadata?.industry || '-'}</td>
+                  <td className="px-4 py-2">{company.metadata?.size || '-'}</td>
+                  <td className="px-4 py-2">{company.metadata?.location || '-'}</td>
+                  <td className="px-4 py-2">
+                    <a
+                      href={company.linkedin_url}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="text-blue-500 hover:text-blue-600"
+                    >
+                      View on LinkedIn
+                    </a>
+                  </td>
                 </tr>
-              </thead>
-              <tbody className="bg-white divide-y divide-gray-200">
-                {campaign.outreach_companies.map((company: any) => (
-                  <tr key={company.id}>
-                    <td className="px-6 py-4 whitespace-nowrap">
-                      {company.domain}
-                    </td>
-                    <td className="px-6 py-4 whitespace-nowrap">
-                      <span className={`px-2 inline-flex text-xs leading-5 font-semibold rounded-full ${
-                        company.status === 'scraped' ? 'bg-green-100 text-green-800' :
-                        'bg-gray-100 text-gray-800'
-                      }`}>
-                        {company.status}
-                      </span>
-                    </td>
-                    <td className="px-6 py-4">
-                      {company.outreach_contacts?.map((contact: any) => (
-                        <div key={contact.id} className="text-sm">
-                          {contact.name} ({contact.email})
-                        </div>
-                      ))}
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        ) : (
-          <p className="text-gray-500">No companies found yet. Activate the campaign to start scraping.</p>
-        )}
+              ))}
+            </tbody>
+          </table>
+        </div>
       </div>
+
+      {/* Contacts */}
+      <div className="bg-white rounded-lg shadow p-4">
+        <h2 className="text-xl font-semibold mb-2">Contacts ({contacts.length})</h2>
+        <div className="overflow-x-auto">
+          <table className="min-w-full">
+            <thead>
+              <tr className="bg-gray-100">
+                <th className="px-4 py-2">Name</th>
+                <th className="px-4 py-2">Title</th>
+                <th className="px-4 py-2">Email</th>
+                <th className="px-4 py-2">Location</th>
+                <th className="px-4 py-2">Actions</th>
+              </tr>
+            </thead>
+            <tbody>
+              {contacts.map(contact => (
+                <tr key={contact.id} className="border-t">
+                  <td className="px-4 py-2">{contact.name}</td>
+                  <td className="px-4 py-2">{contact.title}</td>
+                  <td className="px-4 py-2">{contact.email}</td>
+                  <td className="px-4 py-2">{contact.metadata?.location || '-'}</td>
+                  <td className="px-4 py-2">
+                    <a
+                      href={contact.linkedin_url}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="text-blue-500 hover:text-blue-600"
+                    >
+                      View on LinkedIn
+                    </a>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      {errorMsg && (
+        <div className="bg-red-100 border border-red-400 text-red-700 px-4 py-3 rounded mt-4">
+          {errorMsg}
+        </div>
+      )}
     </div>
   );
 } 

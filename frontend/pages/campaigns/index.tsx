@@ -10,8 +10,14 @@ interface Campaign {
   metadata: {
     queries?: string[];
     scraping_status?: string;
+    current_query?: string;
+    processed_companies?: number;
+    error?: string;
+    completed_at?: string;
   };
   created_at: string;
+  outreach_companies_count: number;
+  outreach_contacts_count: number;
 }
 
 export default function CampaignsIndexPage() {
@@ -21,6 +27,8 @@ export default function CampaignsIndexPage() {
 
   useEffect(() => {
     loadCampaigns();
+    const interval = setInterval(loadCampaigns, 5000); // Poll every 5 seconds
+    return () => clearInterval(interval);
   }, []);
 
   async function loadCampaigns() {
@@ -35,9 +43,8 @@ export default function CampaignsIndexPage() {
         .from('outreach_campaigns')
         .select(`
           *,
-          outreach_companies:outreach_companies_count (
-            count
-          )
+          outreach_companies_count:outreach_companies (count),
+          outreach_contacts_count:outreach_contacts (count)
         `)
         .order('created_at', { ascending: false });
 
@@ -53,92 +60,110 @@ export default function CampaignsIndexPage() {
     }
   }
 
-  if (isLoading) {
-    return (
-      <div className="container mx-auto p-4">
-        <p>Loading campaigns...</p>
-      </div>
-    );
-  }
+  if (isLoading) return <div>Loading...</div>;
 
   return (
     <div className="container mx-auto p-4">
       <div className="flex justify-between items-center mb-6">
         <h1 className="text-2xl font-bold">Campaigns</h1>
-        <Link 
+        <Link
           href="/campaigns/new"
-          className="inline-flex justify-center rounded-md border border-transparent bg-indigo-600 py-2 px-4 text-sm font-medium text-white shadow-sm hover:bg-indigo-700 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:ring-offset-2"
+          className="bg-blue-500 text-white px-4 py-2 rounded hover:bg-blue-600"
         >
           Create Campaign
         </Link>
       </div>
 
-      {errorMsg && <p className="text-red-500 mb-4">{errorMsg}</p>}
-
-      {campaigns.length === 0 ? (
-        <div className="text-center py-12">
-          <h3 className="text-lg font-medium text-gray-900 mb-2">No campaigns yet</h3>
-          <p className="text-gray-500 mb-4">Get started by creating your first campaign</p>
-          <Link
-            href="/campaigns/new"
-            className="inline-flex justify-center rounded-md border border-transparent bg-indigo-600 py-2 px-4 text-sm font-medium text-white shadow-sm hover:bg-indigo-700 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:ring-offset-2"
-          >
-            Create Your First Campaign
-          </Link>
-        </div>
-      ) : (
-        <div className="bg-white shadow overflow-hidden sm:rounded-md">
-          <ul className="divide-y divide-gray-200">
-            {campaigns.map((campaign) => (
-              <li key={campaign.id}>
-                <Link 
-                  href={`/campaigns/${campaign.id}`}
-                  className="block hover:bg-gray-50"
-                >
-                  <div className="px-4 py-4 sm:px-6">
-                    <div className="flex items-center justify-between">
-                      <div className="flex-1 min-w-0">
-                        <p className="text-sm font-medium text-indigo-600 truncate">
-                          {campaign.name}
-                        </p>
-                        <p className="mt-1 text-sm text-gray-500">
-                          {campaign.description}
-                        </p>
-                      </div>
-                      <div className="ml-4 flex-shrink-0 flex items-center space-x-4">
-                        <span className={`px-2 inline-flex text-xs leading-5 font-semibold rounded-full ${
-                          campaign.status === 'draft' ? 'bg-gray-100 text-gray-800' :
-                          campaign.status === 'active' ? 'bg-green-100 text-green-800' :
-                          'bg-blue-100 text-blue-800'
-                        }`}>
-                          {campaign.status}
-                        </span>
-                        {campaign.metadata?.scraping_status === 'completed' && (
-                          <span className="bg-green-100 text-green-800 px-2 inline-flex text-xs leading-5 font-semibold rounded-full">
-                            Scraping Complete
-                          </span>
-                        )}
-                      </div>
-                    </div>
-                    <div className="mt-2 sm:flex sm:justify-between">
-                      <div className="sm:flex">
-                        <p className="flex items-center text-sm text-gray-500">
-                          {campaign.metadata?.queries?.length || 0} queries
-                        </p>
-                      </div>
-                      <div className="mt-2 flex items-center text-sm text-gray-500 sm:mt-0">
-                        <p>
-                          Created {new Date(campaign.created_at).toLocaleDateString()}
-                        </p>
-                      </div>
-                    </div>
-                  </div>
-                </Link>
-              </li>
-            ))}
-          </ul>
+      {errorMsg && (
+        <div className="bg-red-100 border border-red-400 text-red-700 px-4 py-3 rounded mb-4">
+          {errorMsg}
         </div>
       )}
+
+      <div className="bg-white rounded-lg shadow overflow-hidden">
+        <table className="min-w-full">
+          <thead>
+            <tr className="bg-gray-100">
+              <th className="px-4 py-2 text-left">Name</th>
+              <th className="px-4 py-2 text-left">Status</th>
+              <th className="px-4 py-2 text-left">Progress</th>
+              <th className="px-4 py-2 text-left">Companies</th>
+              <th className="px-4 py-2 text-left">Contacts</th>
+              <th className="px-4 py-2 text-left">Created</th>
+            </tr>
+          </thead>
+          <tbody>
+            {campaigns.map(campaign => (
+              <tr key={campaign.id} className="border-t hover:bg-gray-50">
+                <td className="px-4 py-2">
+                  <Link
+                    href={`/campaigns/${campaign.id}`}
+                    className="text-blue-500 hover:text-blue-600 font-medium"
+                  >
+                    {campaign.name}
+                  </Link>
+                  <p className="text-sm text-gray-500">{campaign.description}</p>
+                </td>
+                <td className="px-4 py-2">
+                  <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${
+                    campaign.status === 'draft'
+                      ? 'bg-gray-100 text-gray-800'
+                      : campaign.status === 'active'
+                      ? 'bg-green-100 text-green-800'
+                      : 'bg-blue-100 text-blue-800'
+                  }`}>
+                    {campaign.status}
+                  </span>
+                </td>
+                <td className="px-4 py-2">
+                  {campaign.metadata?.scraping_status ? (
+                    <div>
+                      <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${
+                        campaign.metadata.scraping_status === 'in_progress'
+                          ? 'bg-yellow-100 text-yellow-800'
+                          : campaign.metadata.scraping_status === 'complete'
+                          ? 'bg-green-100 text-green-800'
+                          : campaign.metadata.scraping_status === 'failed'
+                          ? 'bg-red-100 text-red-800'
+                          : 'bg-gray-100 text-gray-800'
+                      }`}>
+                        {campaign.metadata.scraping_status}
+                      </span>
+                      {campaign.metadata.current_query && (
+                        <p className="text-sm text-gray-500 mt-1">
+                          Query: {campaign.metadata.current_query}
+                        </p>
+                      )}
+                    </div>
+                  ) : (
+                    '-'
+                  )}
+                </td>
+                <td className="px-4 py-2">
+                  <span className="text-gray-900 font-medium">
+                    {campaign.outreach_companies_count}
+                  </span>
+                </td>
+                <td className="px-4 py-2">
+                  <span className="text-gray-900 font-medium">
+                    {campaign.outreach_contacts_count}
+                  </span>
+                </td>
+                <td className="px-4 py-2 text-gray-500">
+                  {new Date(campaign.created_at).toLocaleDateString()}
+                </td>
+              </tr>
+            ))}
+            {campaigns.length === 0 && (
+              <tr>
+                <td colSpan={6} className="px-4 py-8 text-center text-gray-500">
+                  No campaigns yet. Create your first campaign to get started!
+                </td>
+              </tr>
+            )}
+          </tbody>
+        </table>
+      </div>
     </div>
   );
 } 
