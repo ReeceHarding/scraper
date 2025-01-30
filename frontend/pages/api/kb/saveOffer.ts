@@ -8,7 +8,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     return res.status(405).send('Method Not Allowed');
   }
 
-  const { title, description, content, existingId } = req.body;
+  const { title, description, content } = req.body;
   if (!title || !description || !content) {
     return res.status(400).send('Missing required fields');
   }
@@ -31,24 +31,29 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
       return res.status(400).send('User has no organization');
     }
 
-    let doc;
+    // Check if an offer already exists
+    const { data: existingOffers } = await supabaseAdmin
+      .from('knowledge_docs')
+      .select('id')
+      .eq('metadata->is_offer', true)
+      .eq('org_id', profile.org_id);
 
-    if (existingId) {
+    let docId: string;
+
+    if (existingOffers && existingOffers.length > 0) {
       // Update existing offer
-      const { data: updatedDoc, error: updateError } = await supabaseAdmin
+      const { data: doc, error: updateError } = await supabaseAdmin
         .from('knowledge_docs')
         .update({
           title,
           description,
-          content,
           metadata: {
-            type: 'hormozi_offer',
+            is_offer: true,
             status: 'pending',
-            last_updated: new Date().toISOString()
+            updated_at: new Date().toISOString()
           }
         })
-        .eq('id', existingId)
-        .eq('metadata->type', 'hormozi_offer')
+        .eq('id', existingOffers[0].id)
         .select()
         .single();
 
@@ -57,18 +62,23 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
         return res.status(500).send('Failed to update offer');
       }
 
-      doc = updatedDoc;
+      docId = doc.id;
+
+      // Delete existing chunks
+      await supabaseAdmin
+        .from('knowledge_doc_chunks')
+        .delete()
+        .eq('doc_id', docId);
     } else {
       // Create new offer
-      const { data: newDoc, error: insertError } = await supabaseAdmin
+      const { data: doc, error: insertError } = await supabaseAdmin
         .from('knowledge_docs')
         .insert({
           org_id: profile.org_id,
           title,
           description,
-          content,
           metadata: {
-            type: 'hormozi_offer',
+            is_offer: true,
             status: 'pending',
             created_at: new Date().toISOString()
           }
@@ -81,19 +91,24 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
         return res.status(500).send('Failed to create offer');
       }
 
-      doc = newDoc;
+      docId = doc.id;
     }
 
     // Queue embedding job
     await embeddingQueue.add('embedDoc', {
-      docId: doc.id,
+      docId,
       orgId: profile.org_id,
-      content,
-      isOffer: true
+      content
+    }, {
+      attempts: 3,
+      backoff: {
+        type: 'exponential',
+        delay: 1000
+      }
     });
 
-    logger.info(`Offer ${doc.id} saved and queued for embedding`);
-    return res.status(200).json(doc);
+    logger.info(`Offer ${docId} saved and queued for embedding`);
+    return res.status(200).json({ docId });
   } catch (err: any) {
     logger.error('Error in saveOffer:', err);
     return res.status(500).send(err.message || 'Internal server error');

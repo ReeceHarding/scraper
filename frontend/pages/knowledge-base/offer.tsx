@@ -1,5 +1,6 @@
-import { useState, useEffect } from 'react';
+import { useEffect, useState } from 'react';
 import { useRouter } from 'next/router';
+import Link from 'next/link';
 import { supabaseClient } from '../../lib/supabaseClient';
 
 interface OfferDoc {
@@ -8,55 +9,64 @@ interface OfferDoc {
   description: string;
   content: string;
   metadata: {
-    type: 'hormozi_offer';
+    is_offer: boolean;
     status: string;
-    last_updated?: string;
   };
 }
 
-export default function HormoziOfferPage() {
-  const [title, setTitle] = useState('Your Hormozi-Style Offer');
-  const [description, setDescription] = useState('Core offer and value proposition');
-  const [content, setContent] = useState('');
+export default function OfferPage() {
+  const [offerText, setOfferText] = useState('');
+  const [title, setTitle] = useState('');
+  const [description, setDescription] = useState('');
   const [errorMsg, setErrorMsg] = useState('');
   const [successMsg, setSuccessMsg] = useState('');
-  const [existingOffer, setExistingOffer] = useState<OfferDoc | null>(null);
-  const [isLoading, setIsLoading] = useState(true);
+  const [loading, setLoading] = useState(true);
   const router = useRouter();
 
   useEffect(() => {
-    async function fetchExistingOffer() {
+    async function fetchOffer() {
       try {
+        const { data: authData } = await supabaseClient.auth.getUser();
+        if (!authData?.user) {
+          setErrorMsg('Not logged in');
+          router.push('/auth/login');
+          return;
+        }
+
         const { data: docs, error } = await supabaseClient
           .from('knowledge_docs')
           .select('*')
-          .eq('metadata->type', 'hormozi_offer')
-          .maybeSingle();
+          .eq('metadata->is_offer', true)
+          .limit(1);
 
-        if (error) throw error;
+        if (error) {
+          console.error('Error fetching offer:', error);
+          setErrorMsg(error.message);
+          return;
+        }
 
-        if (docs) {
-          setExistingOffer(docs);
-          setTitle(docs.title);
-          setDescription(docs.description);
-          setContent(docs.content || '');
+        if (docs && docs.length > 0) {
+          const offer = docs[0] as OfferDoc;
+          setTitle(offer.title);
+          setDescription(offer.description);
+          setOfferText(offer.content || '');
         }
       } catch (err: any) {
-        setErrorMsg(err.message || String(err));
+        console.error('Error in fetchOffer:', err);
+        setErrorMsg(err.message || 'An error occurred');
       } finally {
-        setIsLoading(false);
+        setLoading(false);
       }
     }
 
-    fetchExistingOffer();
-  }, []);
+    fetchOffer();
+  }, [router]);
 
   async function handleSave() {
     setErrorMsg('');
     setSuccessMsg('');
-
-    if (!content.trim()) {
-      setErrorMsg('Please enter your offer content');
+    if (!offerText.trim() || !title.trim() || !description.trim()) {
+      setErrorMsg('Please provide title, description, and offer text');
       return;
     }
 
@@ -67,8 +77,7 @@ export default function HormoziOfferPage() {
         body: JSON.stringify({
           title,
           description,
-          content,
-          existingId: existingOffer?.id
+          content: offerText
         })
       });
 
@@ -85,72 +94,87 @@ export default function HormoziOfferPage() {
     }
   }
 
-  if (isLoading) {
+  if (loading) {
     return (
       <div className="container mx-auto px-4 py-8">
-        <p>Loading...</p>
+        <div className="text-center">Loading...</div>
       </div>
     );
   }
 
   return (
     <div className="container mx-auto px-4 py-8">
-      <h1 className="text-3xl font-bold mb-8">Hormozi-Style Offer</h1>
-      {errorMsg && <p className="text-red-500 mb-4">{errorMsg}</p>}
-      {successMsg && <p className="text-green-500 mb-4">{successMsg}</p>}
-
-      <div className="max-w-3xl">
-        <div className="mb-6">
-          <label className="block text-sm font-medium mb-2">Title</label>
-          <input
-            type="text"
-            value={title}
-            onChange={(e) => setTitle(e.target.value)}
-            className="w-full px-3 py-2 border rounded-md"
-          />
-        </div>
-        
-        <div className="mb-6">
-          <label className="block text-sm font-medium mb-2">Description</label>
-          <input
-            type="text"
-            value={description}
-            onChange={(e) => setDescription(e.target.value)}
-            className="w-full px-3 py-2 border rounded-md"
-          />
+      <div className="max-w-4xl mx-auto">
+        <div className="flex items-center justify-between mb-8">
+          <h1 className="text-3xl font-bold">Hormozi-Style Offer</h1>
+          <Link
+            href="/knowledge-base"
+            className="text-blue-500 hover:text-blue-600"
+          >
+            Back to Knowledge Base
+          </Link>
         </div>
 
-        <div className="mb-6">
-          <label className="block text-sm font-medium mb-2">Offer Content</label>
-          <div className="bg-gray-50 p-4 rounded-md mb-2">
-            <p className="text-sm text-gray-600">
-              Write your offer following the Hormozi framework:
-            </p>
-            <ul className="list-disc ml-5 text-sm text-gray-600">
-              <li>What specific result or transformation do you deliver?</li>
-              <li>Who exactly is it for?</li>
-              <li>How long does it take?</li>
-              <li>What makes your approach unique?</li>
-              <li>What's included in the offer?</li>
-              <li>What's the investment required?</li>
-              <li>What guarantees or risk reversals do you provide?</li>
-            </ul>
+        {errorMsg && (
+          <div className="bg-red-100 border border-red-400 text-red-700 px-4 py-3 rounded mb-4">
+            {errorMsg}
           </div>
-          <textarea
-            value={content}
-            onChange={(e) => setContent(e.target.value)}
-            className="w-full px-3 py-2 border rounded-md"
-            rows={15}
-            placeholder="Enter your offer details..."
-          />
-        </div>
+        )}
 
-        <button
-          onClick={handleSave}
-          className="bg-blue-500 text-white px-6 py-2 rounded-md hover:bg-blue-600 transition-colors"
-        >
-          Save Offer
-        </button>
+        {successMsg && (
+          <div className="bg-green-100 border border-green-400 text-green-700 px-4 py-3 rounded mb-4">
+            {successMsg}
+          </div>
+        )}
+
+        <div className="bg-white shadow-md rounded-lg p-6">
+          <div className="mb-6">
+            <label className="block text-sm font-medium mb-2">Title</label>
+            <input
+              type="text"
+              value={title}
+              onChange={(e) => setTitle(e.target.value)}
+              className="w-full px-3 py-2 border rounded-md"
+              placeholder="e.g., Our Core Offer"
+            />
+          </div>
+
+          <div className="mb-6">
+            <label className="block text-sm font-medium mb-2">Description</label>
+            <input
+              type="text"
+              value={description}
+              onChange={(e) => setDescription(e.target.value)}
+              className="w-full px-3 py-2 border rounded-md"
+              placeholder="e.g., Our main value proposition"
+            />
+          </div>
+
+          <div className="mb-6">
+            <label className="block text-sm font-medium mb-2">
+              Offer Text
+              <span className="text-gray-500 ml-2">
+                (Write your offer in Hormozi style)
+              </span>
+            </label>
+            <textarea
+              value={offerText}
+              onChange={(e) => setOfferText(e.target.value)}
+              className="w-full px-3 py-2 border rounded-md h-64"
+              placeholder="Describe your offer in detail..."
+            />
+            <p className="text-sm text-gray-500 mt-2">
+              Pro tip: Follow Alex Hormozi's framework - Problem → Agitation → Solution → Result
+            </p>
+          </div>
+
+          <button
+            onClick={handleSave}
+            className="bg-blue-500 text-white px-6 py-2 rounded-md hover:bg-blue-600 transition-colors"
+          >
+            Save Offer
+          </button>
+        </div>
       </div>
     </div>
   );
