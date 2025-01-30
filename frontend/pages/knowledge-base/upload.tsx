@@ -1,57 +1,7 @@
-import { useState, ChangeEvent } from 'react';
+import { useState } from 'react';
 import { supabaseClient } from '../../lib/supabaseClient';
 import { useRouter } from 'next/router';
 import { toast } from 'react-hot-toast';
-
-// Basic UI components since we don't have the common components yet
-const Input = ({ type, value, onChange, placeholder, accept, className = '' }: {
-  type: string;
-  value?: string;
-  onChange: (e: ChangeEvent<HTMLInputElement>) => void;
-  placeholder?: string;
-  accept?: string;
-  className?: string;
-}) => (
-  <input
-    type={type}
-    value={value}
-    onChange={onChange}
-    placeholder={placeholder}
-    accept={accept}
-    className={`w-full px-3 py-2 border rounded-md ${className}`}
-  />
-);
-
-const Textarea = ({ value, onChange, placeholder, rows = 4, className = '' }: {
-  value: string;
-  onChange: (e: ChangeEvent<HTMLTextAreaElement>) => void;
-  placeholder?: string;
-  rows?: number;
-  className?: string;
-}) => (
-  <textarea
-    value={value}
-    onChange={onChange}
-    placeholder={placeholder}
-    rows={rows}
-    className={`w-full px-3 py-2 border rounded-md ${className}`}
-  />
-);
-
-const Button = ({ onClick, disabled, className = '', children }: {
-  onClick: () => void;
-  disabled?: boolean;
-  className?: string;
-  children: React.ReactNode;
-}) => (
-  <button
-    onClick={onClick}
-    disabled={disabled}
-    className={`px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 disabled:opacity-50 ${className}`}
-  >
-    {children}
-  </button>
-);
 
 export default function UploadDocPage() {
   const [file, setFile] = useState<File | null>(null);
@@ -102,7 +52,8 @@ export default function UploadDocPage() {
 
       if (!docInsert.ok) {
         const text = await docInsert.text();
-        throw new Error(`Failed to insert doc: ${text}`);
+        toast.error(`Failed to insert doc: ${text}`);
+        return;
       }
 
       toast.success('Document uploaded successfully');
@@ -116,52 +67,60 @@ export default function UploadDocPage() {
 
   return (
     <div className="container mx-auto px-4 py-8">
-      <h1 className="text-2xl font-bold mb-6">Upload a Document</h1>
+      <h1 className="text-3xl font-bold mb-8">Upload a Document</h1>
 
       <div className="max-w-lg space-y-6">
         <div>
-          <label className="block text-sm font-medium mb-2">Title</label>
-          <Input
+          <label className="block text-sm font-medium text-gray-700 mb-2">
+            Title
+          </label>
+          <input
             type="text"
             value={title}
             onChange={(e) => setTitle(e.target.value)}
+            className="w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-indigo-500 focus:border-indigo-500"
             placeholder="Enter document title"
           />
         </div>
 
         <div>
-          <label className="block text-sm font-medium mb-2">Description</label>
-          <Textarea
+          <label className="block text-sm font-medium text-gray-700 mb-2">
+            Description
+          </label>
+          <textarea
             value={description}
             onChange={(e) => setDescription(e.target.value)}
-            placeholder="Enter document description"
+            className="w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-indigo-500 focus:border-indigo-500"
             rows={4}
+            placeholder="Enter document description"
           />
         </div>
 
         <div>
-          <label className="block text-sm font-medium mb-2">Choose File</label>
-          <Input
+          <label className="block text-sm font-medium text-gray-700 mb-2">
+            Choose File
+          </label>
+          <input
             type="file"
-            accept=".pdf,.doc,.docx,.txt"
             onChange={(e) => {
               if (e.target.files && e.target.files.length > 0) {
                 setFile(e.target.files[0]);
               }
             }}
+            className="w-full"
+            accept=".pdf,.doc,.docx,.txt"
           />
-          <p className="text-sm text-gray-500 mt-1">
-            Supported formats: PDF, DOC, DOCX, TXT
-          </p>
         </div>
 
-        <Button
+        <button
           onClick={handleUpload}
           disabled={isLoading}
-          className="w-full"
+          className={`w-full flex justify-center py-2 px-4 border border-transparent rounded-md shadow-sm text-sm font-medium text-white bg-indigo-600 hover:bg-indigo-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500 ${
+            isLoading ? 'opacity-50 cursor-not-allowed' : ''
+          }`}
         >
-          {isLoading ? 'Uploading...' : 'Upload Document'}
-        </Button>
+          {isLoading ? 'Uploading...' : 'Upload and Process'}
+        </button>
       </div>
     </div>
   );

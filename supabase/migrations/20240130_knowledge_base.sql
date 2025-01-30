@@ -33,4 +33,22 @@ CREATE INDEX IF NOT EXISTS idx_knowledge_doc_chunks_doc_id ON public.knowledge_d
 
 -- Disable RLS
 ALTER TABLE public.knowledge_docs DISABLE ROW LEVEL SECURITY;
-ALTER TABLE public.knowledge_doc_chunks DISABLE ROW LEVEL SECURITY; 
+ALTER TABLE public.knowledge_doc_chunks DISABLE ROW LEVEL SECURITY;
+
+-- Create storage bucket for document attachments
+INSERT INTO storage.buckets (id, name, public)
+VALUES ('doc_attachments', 'doc_attachments', true)
+ON CONFLICT (id) DO NOTHING;
+
+-- Allow public access to doc_attachments bucket
+CREATE POLICY "Public Access"
+ON storage.objects FOR SELECT
+USING (bucket_id = 'doc_attachments');
+
+-- Allow authenticated users to upload to doc_attachments bucket
+CREATE POLICY "Authenticated Upload"
+ON storage.objects FOR INSERT
+WITH CHECK (
+  bucket_id = 'doc_attachments'
+  AND auth.role() = 'authenticated'
+); 
