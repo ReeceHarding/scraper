@@ -8,12 +8,7 @@ interface Campaign {
   description: string;
   status: string;
   metadata: {
-    queries?: string[];
-    scraping_status?: string;
-    current_query?: string;
-    processed_companies?: number;
-    error?: string;
-    completed_at?: string;
+    queries: string[];
   };
   created_at: string;
 }
@@ -48,212 +43,159 @@ export default function CampaignDetailPage() {
   const [campaign, setCampaign] = useState<Campaign | null>(null);
   const [companies, setCompanies] = useState<Company[]>([]);
   const [contacts, setContacts] = useState<Contact[]>([]);
-  const [errorMsg, setErrorMsg] = useState('');
-  const [isLoading, setIsLoading] = useState(true);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState('');
+  const [activating, setActivating] = useState(false);
 
   useEffect(() => {
     if (!id) return;
-    loadCampaignData();
-    const interval = setInterval(loadCampaignData, 5000); // Poll every 5 seconds
-    return () => clearInterval(interval);
+
+    async function fetchCampaign() {
+      try {
+        const { data, error } = await supabaseClient
+          .from('outreach_campaigns')
+          .select('*')
+          .eq('id', id)
+          .single();
+
+        if (error) {
+          setError(error.message);
+        } else {
+          setCampaign(data);
+        }
+      } catch (err: any) {
+        setError(err.message || String(err));
+      } finally {
+        setLoading(false);
+      }
+    }
+
+    fetchCampaign();
   }, [id]);
 
-  async function loadCampaignData() {
+  async function handleActivate() {
+    if (!campaign || activating) return;
+
+    setActivating(true);
+    setError('');
+
     try {
-      // Load campaign
-      const { data: campaignData, error: campaignError } = await supabaseClient
+      const resp = await fetch(`/api/campaigns/activate?id=${campaign.id}`, {
+        method: 'POST'
+      });
+
+      if (!resp.ok) {
+        const text = await resp.text();
+        throw new Error(text);
+      }
+
+      // Refresh campaign data
+      const { data, error } = await supabaseClient
         .from('outreach_campaigns')
         .select('*')
-        .eq('id', id)
+        .eq('id', campaign.id)
         .single();
 
-      if (campaignError) {
-        setErrorMsg(campaignError.message);
-        return;
+      if (error) {
+        throw error;
       }
 
-      setCampaign(campaignData);
-
-      // Load companies
-      const { data: companiesData, error: companiesError } = await supabaseClient
-        .from('outreach_companies')
-        .select('*')
-        .eq('campaign_id', id);
-
-      if (companiesError) {
-        setErrorMsg(companiesError.message);
-        return;
-      }
-
-      setCompanies(companiesData);
-
-      // Load contacts
-      const { data: contactsData, error: contactsError } = await supabaseClient
-        .from('outreach_contacts')
-        .select('*')
-        .eq('campaign_id', id);
-
-      if (contactsError) {
-        setErrorMsg(contactsError.message);
-        return;
-      }
-
-      setContacts(contactsData);
-      setIsLoading(false);
+      setCampaign(data);
     } catch (err: any) {
-      setErrorMsg(err.message || String(err));
+      setError(err.message || String(err));
+    } finally {
+      setActivating(false);
     }
   }
 
-  async function handleActivate() {
-    setErrorMsg('');
-    try {
-      const resp = await fetch(`/api/campaigns/activate?id=${id}`, { method: 'POST' });
-      if (!resp.ok) {
-        const txt = await resp.text();
-        setErrorMsg(txt);
-      } else {
-        await loadCampaignData(); // Refresh data immediately
-      }
-    } catch (err: any) {
-      setErrorMsg(err.message || String(err));
-    }
+  if (loading) {
+    return (
+      <div className="container mx-auto p-4">
+        <div className="animate-pulse">
+          <div className="h-8 bg-gray-200 rounded w-1/4 mb-4"></div>
+          <div className="h-4 bg-gray-200 rounded w-full mb-2"></div>
+          <div className="h-4 bg-gray-200 rounded w-3/4"></div>
+        </div>
+      </div>
+    );
   }
 
-  if (isLoading || !campaign) return <div>Loading... {errorMsg}</div>;
+  if (error) {
+    return (
+      <div className="container mx-auto p-4">
+        <div className="bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded">
+          Error: {error}
+        </div>
+      </div>
+    );
+  }
+
+  if (!campaign) {
+    return (
+      <div className="container mx-auto p-4">
+        <div className="bg-yellow-50 border border-yellow-200 text-yellow-700 px-4 py-3 rounded">
+          Campaign not found
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="container mx-auto p-4">
-      <h1 className="text-2xl font-bold mb-4">Campaign: {campaign.name}</h1>
-      
-      {/* Campaign Info */}
-      <div className="bg-white rounded-lg shadow p-4 mb-4">
-        <h2 className="text-xl font-semibold mb-2">Campaign Details</h2>
-        <p><strong>Description:</strong> {campaign.description}</p>
-        <p><strong>Status:</strong> {campaign.status}</p>
-        <p><strong>Created:</strong> {new Date(campaign.created_at).toLocaleString()}</p>
-        
-        {/* Scraping Status */}
-        {campaign.metadata?.scraping_status && (
-          <div className="mt-2">
-            <p><strong>Scraping Status:</strong> {campaign.metadata.scraping_status}</p>
-            {campaign.metadata.current_query && (
-              <p><strong>Current Query:</strong> {campaign.metadata.current_query}</p>
-            )}
-            {campaign.metadata.processed_companies !== undefined && (
-              <p><strong>Companies Processed:</strong> {campaign.metadata.processed_companies}</p>
-            )}
-            {campaign.metadata.completed_at && (
-              <p><strong>Completed At:</strong> {new Date(campaign.metadata.completed_at).toLocaleString()}</p>
-            )}
-            {campaign.metadata.error && (
-              <p className="text-red-500"><strong>Error:</strong> {campaign.metadata.error}</p>
+      <div className="bg-white shadow rounded-lg p-6">
+        <div className="flex justify-between items-start mb-6">
+          <div>
+            <h1 className="text-2xl font-bold text-gray-900">{campaign.name}</h1>
+            <p className="text-sm text-gray-500">Created {new Date(campaign.created_at).toLocaleDateString()}</p>
+          </div>
+          <div className="flex items-center space-x-2">
+            <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium capitalize
+              ${campaign.status === 'active' ? 'bg-green-100 text-green-800' :
+                campaign.status === 'draft' ? 'bg-gray-100 text-gray-800' :
+                campaign.status === 'paused' ? 'bg-yellow-100 text-yellow-800' :
+                'bg-blue-100 text-blue-800'
+              }`}
+            >
+              {campaign.status}
+            </span>
+          </div>
+        </div>
+
+        <div className="prose max-w-none mb-6">
+          <h2 className="text-lg font-medium text-gray-900 mb-2">Description</h2>
+          <p className="text-gray-700">{campaign.description}</p>
+        </div>
+
+        <div className="mb-6">
+          <h2 className="text-lg font-medium text-gray-900 mb-2">Search Queries</h2>
+          <div className="space-y-2">
+            {campaign.metadata.queries.map((query, idx) => (
+              <div key={idx} className="bg-gray-50 px-4 py-2 rounded-md text-gray-700">
+                {query}
+              </div>
+            ))}
+          </div>
+        </div>
+
+        {campaign.status === 'draft' && (
+          <div className="border-t pt-4">
+            <button
+              onClick={handleActivate}
+              disabled={activating}
+              className={`inline-flex justify-center py-2 px-4 border border-transparent shadow-sm text-sm font-medium rounded-md text-white 
+                ${activating ? 'bg-indigo-400 cursor-not-allowed' : 'bg-indigo-600 hover:bg-indigo-700'}
+                focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500`}
+            >
+              {activating ? 'Activating...' : 'Activate Campaign'}
+            </button>
+            {error && (
+              <p className="mt-2 text-sm text-red-600">
+                {error}
+              </p>
             )}
           </div>
         )}
-
-        {/* Activation Button */}
-        {campaign.status === 'draft' && (
-          <button
-            onClick={handleActivate}
-            className="mt-4 bg-blue-500 text-white px-4 py-2 rounded hover:bg-blue-600"
-          >
-            Activate & Start Scraping
-          </button>
-        )}
       </div>
-
-      {/* Search Queries */}
-      <div className="bg-white rounded-lg shadow p-4 mb-4">
-        <h2 className="text-xl font-semibold mb-2">Search Queries</h2>
-        <ul className="list-disc pl-4">
-          {campaign.metadata?.queries?.map((query, idx) => (
-            <li key={idx}>{query}</li>
-          ))}
-        </ul>
-      </div>
-
-      {/* Companies */}
-      <div className="bg-white rounded-lg shadow p-4 mb-4">
-        <h2 className="text-xl font-semibold mb-2">Companies ({companies.length})</h2>
-        <div className="overflow-x-auto">
-          <table className="min-w-full">
-            <thead>
-              <tr className="bg-gray-100">
-                <th className="px-4 py-2">Name</th>
-                <th className="px-4 py-2">Industry</th>
-                <th className="px-4 py-2">Size</th>
-                <th className="px-4 py-2">Location</th>
-                <th className="px-4 py-2">Actions</th>
-              </tr>
-            </thead>
-            <tbody>
-              {companies.map(company => (
-                <tr key={company.id} className="border-t">
-                  <td className="px-4 py-2">{company.name}</td>
-                  <td className="px-4 py-2">{company.metadata?.industry || '-'}</td>
-                  <td className="px-4 py-2">{company.metadata?.size || '-'}</td>
-                  <td className="px-4 py-2">{company.metadata?.location || '-'}</td>
-                  <td className="px-4 py-2">
-                    <a
-                      href={company.linkedin_url}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      className="text-blue-500 hover:text-blue-600"
-                    >
-                      View on LinkedIn
-                    </a>
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-      </div>
-
-      {/* Contacts */}
-      <div className="bg-white rounded-lg shadow p-4">
-        <h2 className="text-xl font-semibold mb-2">Contacts ({contacts.length})</h2>
-        <div className="overflow-x-auto">
-          <table className="min-w-full">
-            <thead>
-              <tr className="bg-gray-100">
-                <th className="px-4 py-2">Name</th>
-                <th className="px-4 py-2">Title</th>
-                <th className="px-4 py-2">Email</th>
-                <th className="px-4 py-2">Location</th>
-                <th className="px-4 py-2">Actions</th>
-              </tr>
-            </thead>
-            <tbody>
-              {contacts.map(contact => (
-                <tr key={contact.id} className="border-t">
-                  <td className="px-4 py-2">{contact.name}</td>
-                  <td className="px-4 py-2">{contact.title}</td>
-                  <td className="px-4 py-2">{contact.email}</td>
-                  <td className="px-4 py-2">{contact.metadata?.location || '-'}</td>
-                  <td className="px-4 py-2">
-                    <a
-                      href={contact.linkedin_url}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      className="text-blue-500 hover:text-blue-600"
-                    >
-                      View on LinkedIn
-                    </a>
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-      </div>
-
-      {errorMsg && (
-        <div className="bg-red-100 border border-red-400 text-red-700 px-4 py-3 rounded mt-4">
-          {errorMsg}
-        </div>
-      )}
     </div>
   );
 } 

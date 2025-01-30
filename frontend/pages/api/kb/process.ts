@@ -20,17 +20,10 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
   }
 
   try {
-    const { docId, url, maxDepth = 2 } = req.body;
+    const { docId } = req.body;
 
-    if (!docId || !url) {
-      return res.status(400).json({ error: 'Missing required fields' });
-    }
-
-    // Validate URL
-    try {
-      new URL(url);
-    } catch {
-      return res.status(400).json({ error: 'Invalid URL' });
+    if (!docId) {
+      return res.status(400).json({ error: 'Missing docId' });
     }
 
     // Verify the document exists and get its details
@@ -45,19 +38,18 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
       return res.status(404).json({ error: 'Document not found' });
     }
 
-    // Add job to crawl queue
-    await redis.lpush('crawl:queue', JSON.stringify({
+    // Add job to embedding queue
+    await redis.lpush('embedding:queue', JSON.stringify({
       id: docId,
-      url,
-      maxDepth,
+      file_path: doc.file_path,
       metadata: doc.metadata
     }));
 
-    console.log(`Added URL ${url} to crawl queue with depth ${maxDepth}`);
+    console.log(`Added document ${docId} to embedding queue`);
 
-    return res.status(200).json({ message: 'Website queued for crawling' });
+    return res.status(200).json({ message: 'Document queued for processing' });
   } catch (error: any) {
-    console.error('Error starting crawl:', error);
+    console.error('Error processing document:', error);
     return res.status(500).json({ error: error.message || 'Internal server error' });
   }
 } 

@@ -51,4 +51,48 @@ ON storage.objects FOR INSERT
 WITH CHECK (
   bucket_id = 'doc_attachments'
   AND auth.role() = 'authenticated'
-); 
+);
+
+-- Create outreach_campaigns table
+CREATE TABLE IF NOT EXISTS public.outreach_campaigns (
+  id uuid DEFAULT uuid_generate_v4() PRIMARY KEY,
+  org_id uuid NOT NULL REFERENCES public.organizations(id) ON DELETE CASCADE,
+  name text NOT NULL,
+  description text NOT NULL,
+  status text NOT NULL CHECK (status IN ('draft', 'active', 'paused', 'completed')),
+  metadata jsonb NOT NULL DEFAULT '{}'::jsonb,
+  created_at timestamptz NOT NULL DEFAULT now(),
+  updated_at timestamptz NOT NULL DEFAULT now()
+);
+
+-- Create outreach_companies table
+CREATE TABLE IF NOT EXISTS public.outreach_companies (
+  id uuid DEFAULT uuid_generate_v4() PRIMARY KEY,
+  campaign_id uuid NOT NULL REFERENCES public.outreach_campaigns(id) ON DELETE CASCADE,
+  domain text NOT NULL,
+  name text,
+  description text,
+  metadata jsonb NOT NULL DEFAULT '{}'::jsonb,
+  created_at timestamptz NOT NULL DEFAULT now(),
+  updated_at timestamptz NOT NULL DEFAULT now(),
+  UNIQUE (campaign_id, domain)
+);
+
+-- Create outreach_contacts table
+CREATE TABLE IF NOT EXISTS public.outreach_contacts (
+  id uuid DEFAULT uuid_generate_v4() PRIMARY KEY,
+  company_id uuid NOT NULL REFERENCES public.outreach_companies(id) ON DELETE CASCADE,
+  email text NOT NULL,
+  first_name text,
+  last_name text,
+  title text,
+  metadata jsonb NOT NULL DEFAULT '{}'::jsonb,
+  created_at timestamptz NOT NULL DEFAULT now(),
+  updated_at timestamptz NOT NULL DEFAULT now(),
+  UNIQUE (company_id, email)
+);
+
+-- Add indexes
+CREATE INDEX IF NOT EXISTS outreach_campaigns_org_id_idx ON public.outreach_campaigns(org_id);
+CREATE INDEX IF NOT EXISTS outreach_companies_campaign_id_idx ON public.outreach_companies(campaign_id);
+CREATE INDEX IF NOT EXISTS outreach_contacts_company_id_idx ON public.outreach_contacts(company_id); 
